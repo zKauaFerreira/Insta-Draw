@@ -1,0 +1,8 @@
+opencv-python
+numpy
+Pillow
+rembg
+pyautogui
+pynput
+# adb is an external tool, not a Python package.
+# Ensure ADB is installed and configured on your system.

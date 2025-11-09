@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# Data files
+data/window_dump.xml
+data/drawing_area_coords.json
+data/traces.json
+
+# User-specific images (assuming these are not part of the core project)
+images/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# Virtual environments
+venv/
+env/
