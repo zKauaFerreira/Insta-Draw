@@ -3,32 +3,32 @@ import math
 # Instagram color palette with HEX and RGB values
 INSTAGRAM_PALETTE = {
     1: [ # Página 1: Cores Vibrantes (Ordem padrão: Branco, Azul, Verde, Amarelo...)
-        {"name": "White", "hex": "#FFFFFF", "rgb": (255, 255, 255)},
-        {"name": "Blue", "hex": "#3897F0", "rgb": (56, 151, 240)},
-        {"name": "Green", "hex": "#4DC752", "rgb": (77, 199, 82)},
-        {"name": "Yellow", "hex": "#FFDC4C", "rgb": (255, 220, 76)},
-        {"name": "Orange", "hex": "#FF9900", "rgb": (255, 153, 0)},
-        {"name": "Orange-red", "hex": "#FF4C4C", "rgb": (255, 76, 76)},
-        {"name": "Red-purple", "hex": "#974CFF", "rgb": (151, 76, 255)},
-        {"name": "Purple", "hex": "#C300F5", "rgb": (195, 0, 245)},
-        {"name": "Red", "hex": "#F5004F", "rgb": (245, 0, 79)}
+        {"name": "White color", "hex": "#FFFFFF", "rgb": (255, 255, 255)},
+        {"name": "Blue color", "hex": "#3897F0", "rgb": (56, 151, 240)},
+        {"name": "Green color", "hex": "#4DC752", "rgb": (77, 199, 82)},
+        {"name": "Yellow color", "hex": "#FFDC4C", "rgb": (255, 220, 76)},
+        {"name": "Orange color", "hex": "#FF9900", "rgb": (255, 153, 0)},
+        {"name": "Orange-red color", "hex": "#FF4C4C", "rgb": (255, 76, 76)},
+        {"name": "Red-purple color", "hex": "#974CFF", "rgb": (151, 76, 255)},
+        {"name": "Purple color", "hex": "#C300F5", "rgb": (195, 0, 245)},
+        {"name": "Red color", "hex": "#F5004F", "rgb": (245, 0, 79)}
     ],
     2: [ # Página 2: Tons de Pele/Neutros (Ordem visual na Imagem 3)
-        {"name": "Red-pink", "hex": "#FF4D97", "rgb": (255, 77, 151)},
-        {"name": "Pink", "hex": "#FF99CC", "rgb": (255, 153, 204)},
-        {"name": "Beige", "hex": "#F5DEB3", "rgb": (245, 222, 179)},
-        {"name": "Pale orange", "hex": "#F0A078", "rgb": (240, 160, 120)},
-        {"name": "Light brown", "hex": "#AF8760", "rgb": (175, 135, 96)},
-        {"name": "Brown", "hex": "#795548", "rgb": (121, 85, 72)},
+        {"name": "Red-pink color", "hex": "#FF4D97", "rgb": (255, 77, 151)},
+        {"name": "Pink color", "hex": "#FF99CC", "rgb": (255, 153, 204)},
+        {"name": "Beige color", "hex": "#F5DEB3", "rgb": (245, 222, 179)},
+        {"name": "Pale orange color", "hex": "#F0A078", "rgb": (240, 160, 120)},
+        {"name": "Light brown color", "hex": "#AF8760", "rgb": (175, 135, 96)},
+        {"name": "Brown color", "hex": "#795548", "rgb": (121, 85, 72)},
         {"name": "Dark gray 3 color", "hex": "#444444", "rgb": (68, 68, 68)},
         {"name": "Dark gray 2 color", "hex": "#222222", "rgb": (34, 34, 34)},
         {"name": "Dark gray 1 color", "hex": "#000000", "rgb": (0, 0, 0)}
     ],
     3: [ # Página 3: Tons de Cinza (Ordem visual na Imagem 2)
-        {"name": "Medium gray 3", "hex": "#AAAAAA", "rgb": (170, 170, 170)},
-        {"name": "Medium gray 2", "hex": "#888888", "rgb": (136, 136, 136)},
-        {"name": "Medium gray 1", "hex": "#666666", "rgb": (102, 102, 102)},
-        {"name": "Light gray 3", "hex": "#CCCCCC", "rgb": (204, 204, 204)}
+        {"name": "Medium gray 3 color", "hex": "#AAAAAA", "rgb": (170, 170, 170)},
+        {"name": "Medium gray 2 color", "hex": "#888888", "rgb": (136, 136, 136)},
+        {"name": "Medium gray 1 color", "hex": "#666666", "rgb": (102, 102, 102)},
+        {"name": "Light gray 3 color", "hex": "#CCCCCC", "rgb": (204, 204, 204)}
     ],
 }
 
