@@ -5,6 +5,7 @@ from pynput import keyboard
 from src.utils.curve_utils import catmull_rom_spline
 from src.utils.file_loader import load_drawing_area_coords, load_traces_data
 from src.utils.mouse_utils import disable_mouse, enable_mouse
+from src.automation.adb_automation import select_color # Import select_color
 
 try:
     import pyautogui
@@ -86,11 +87,13 @@ def draw_strokes_with_pyautogui(
 
     raw_bbox_width = traces_data["raw_bbox_width"]
     raw_bbox_height = traces_data["raw_bbox_height"]
-    traces = traces_data["traces"]
+    grouped_traces = traces_data["grouped_traces"] # Changed from "traces" to "grouped_traces"
 
-    if not traces:
+    if not grouped_traces:
         print("Nenhum traço para desenhar.")
         return
+
+    total_strokes = sum(len(group["paths"]) for group in grouped_traces)
 
     if not drawing_area_coords:
         print("Coordenadas da área de desenho não definidas.")
@@ -108,7 +111,7 @@ def draw_strokes_with_pyautogui(
         f"  Área de desenho no desktop: X={overlay_x}, Y={overlay_y}, W={overlay_width}, H={overlay_height}"
     )
     print(f"  Tamanho original dos traços: {raw_bbox_width}x{raw_bbox_height}")
-    print(f"  Número total de traços: {len(traces)}")
+    print(f"  Número total de traços: {total_strokes}") # Updated total strokes
     print(f"  Velocidade de desenho: {speed_level}")
     print(
         f"  Pausas a cada {strokes_per_chunk} traços por {chunk_break_time} segundos."
@@ -158,83 +161,93 @@ def draw_strokes_with_pyautogui(
     disable_mouse()  # Desabilita o mouse antes de começar a desenhar
     try:
         strokes_drawn_in_chunk = 0
-        for i, trace in enumerate(traces):
+        for color_group in grouped_traces: # Iterate through color groups
             if cancel_drawing:
                 print("Desenho cancelado pelo usuário.")
                 break
 
-            # Introduce a break after a certain number of strokes
-            if strokes_per_chunk > 0 and strokes_drawn_in_chunk >= strokes_per_chunk:
-                pyautogui.mouseUp()  # Ensure mouse is up before the break
-                print(
-                    f"Pausa de {chunk_break_time} segundos para estabilização do aplicativo..."
-                )
-                time.sleep(chunk_break_time)
-                strokes_drawn_in_chunk = 0  # Reset counter
-                if cancel_drawing:  # Check cancellation again after long break
-                    print("Desenho cancelado pelo usuário durante a pausa.")
+            # Select the color for the current group
+            palette_color_info = color_group["palette_color"]
+            target_page = palette_color_info["page_index"]
+            target_index = palette_color_info["color_index"]
+            select_color(target_page, target_index)
+
+            for path in color_group["paths"]: # Iterate through paths within the current color group
+                if cancel_drawing:
+                    print("Desenho cancelado pelo usuário.")
                     break
 
-            # Ensure mouse button is up before starting a new trace
-            pyautogui.mouseUp()
-            time.sleep(pyautogui.PAUSE * 2)  # Give a moment for mouseUp to register
+                # Introduce a break after a certain number of strokes
+                if strokes_per_chunk > 0 and strokes_drawn_in_chunk >= strokes_per_chunk:
+                    pyautogui.mouseUp()  # Ensure mouse is up before the break
+                    print(
+                        f"Pausa de {chunk_break_time} segundos para estabilização do aplicativo..."
+                    )
+                    time.sleep(chunk_break_time)
+                    strokes_drawn_in_chunk = 0  # Reset counter
+                    if cancel_drawing:  # Check cancellation again after long break
+                        print("Desenho cancelado pelo usuário durante a pausa.")
+                        break
 
-            path = trace["path"]
-            if not path:
-                continue
+                # Ensure mouse button is up before starting a new trace
+                pyautogui.mouseUp()
+                time.sleep(pyautogui.PAUSE * 2)  # Give a moment for mouseUp to register
 
-            # Handle isolated points
-            if len(path) == 1:
-                p_norm_x, p_norm_y = path[0]
-                desktop_x = int(overlay_x + center_offset_x + (p_norm_x * final_scale))
-                desktop_y = int(overlay_y + center_offset_y + (p_norm_y * final_scale))
-                pyautogui.moveTo(desktop_x, desktop_y, duration=move_duration)
-                pyautogui.click()  # Simulate a small dot
-                time.sleep(0.05)  # Small delay after a click
-                strokes_drawn_in_chunk += 1
-                continue
+                if not path:
+                    continue
 
-            # Apply Catmull-Rom spline interpolation for smoother curves
-            # Generate more points for smoother drawing
-            interpolated_path = catmull_rom_spline(
-                path, num_segments=5
-            )  # num_segments reduced to 5 for lower event load
+                # Handle isolated points
+                if len(path) == 1:
+                    p_norm_x, p_norm_y = path[0]
+                    desktop_x = int(overlay_x + center_offset_x + (p_norm_x * final_scale))
+                    desktop_y = int(overlay_y + center_offset_y + (p_norm_y * final_scale))
+                    pyautogui.moveTo(desktop_x, desktop_y, duration=move_duration)
+                    pyautogui.click()  # Simulate a small dot
+                    time.sleep(0.05)  # Small delay after a click
+                    strokes_drawn_in_chunk += 1
+                    continue
 
-            # Map the first point to desktop coordinates
-            first_point_norm_x, first_point_norm_y = interpolated_path[0]
-            desktop_x = int(
-                overlay_x + center_offset_x + (first_point_norm_x * final_scale)
-            )
-            desktop_y = int(
-                overlay_y + center_offset_y + (first_point_norm_y * final_scale)
-            )
+                # Apply Catmull-Rom spline interpolation for smoother curves
+                # Generate more points for smoother drawing
+                interpolated_path = catmull_rom_spline(
+                    path, num_segments=5
+                )  # num_segments reduced to 5 for lower event load
 
-            # Move to the first point and press down the mouse button
-            pyautogui.moveTo(desktop_x, desktop_y, duration=move_duration)
-            pyautogui.mouseDown()
-
-            # Drag to all subsequent points
-            for j in range(1, len(interpolated_path)):
-                if cancel_drawing:
-                    break  # Break from inner loop if cancelled
-                current_point_norm_x, current_point_norm_y = interpolated_path[j]
+                # Map the first point to desktop coordinates
+                first_point_norm_x, first_point_norm_y = interpolated_path[0]
                 desktop_x = int(
-                    overlay_x + center_offset_x + (current_point_norm_x * final_scale)
+                    overlay_x + center_offset_x + (first_point_norm_x * final_scale)
                 )
                 desktop_y = int(
-                    overlay_y + center_offset_y + (current_point_norm_y * final_scale)
+                    overlay_y + center_offset_y + (first_point_norm_y * final_scale)
                 )
 
-                # Use dragTo to simulate continuous drawing while mouse button is down
-                pyautogui.dragTo(
-                    desktop_x, desktop_y, duration=move_duration
-                )  # duration changed to move_duration
+                # Move to the first point and press down the mouse button
+                pyautogui.moveTo(desktop_x, desktop_y, duration=move_duration)
+                pyautogui.mouseDown()
 
-            pyautogui.mouseUp()
-            time.sleep(
-                0.1
-            )  # Small pause between traces to allow application to register (increased from 0.05)
-            strokes_drawn_in_chunk += 1  # Increment after successful stroke
+                # Drag to all subsequent points
+                for j in range(1, len(interpolated_path)):
+                    if cancel_drawing:
+                        break  # Break from inner loop if cancelled
+                    current_point_norm_x, current_point_norm_y = interpolated_path[j]
+                    desktop_x = int(
+                        overlay_x + center_offset_x + (current_point_norm_x * final_scale)
+                    )
+                    desktop_y = int(
+                        overlay_y + center_offset_y + (current_point_norm_y * final_scale)
+                    )
+
+                    # Use dragTo to simulate continuous drawing while mouse button is down
+                    pyautogui.dragTo(
+                        desktop_x, desktop_y, duration=move_duration
+                    )  # duration changed to move_duration
+
+                pyautogui.mouseUp()
+                time.sleep(
+                    0.1
+                )  # Small pause between traces to allow application to register (increased from 0.05)
+                strokes_drawn_in_chunk += 1  # Increment after successful stroke
     finally:
         enable_mouse()  # Garante que o mouse seja reabilitado no final
 

@@ -22,7 +22,7 @@ def load_drawing_area_coords(file_path="data/drawing_area_coords.json"):
 def load_traces_data(file_path="data/traces.json"):
     """
     Carrega os dados dos traços do arquivo JSON.
-    Espera um dicionário com 'raw_bbox_width', 'raw_bbox_height' e 'traces'.
+    Espera um dicionário com 'raw_bbox_width', 'raw_bbox_height' e 'grouped_traces'.
     """
     if not os.path.exists(file_path):
         print(f"🚨 Erro: Arquivo de traços não encontrado: {file_path}")
@@ -34,11 +34,11 @@ def load_traces_data(file_path="data/traces.json"):
             if (
                 not isinstance(data, dict)
                 or "raw_bbox_width" not in data
-                or "traces" not in data
+                or "grouped_traces" not in data
             ):
                 print(f"🚨 Erro: Formato de arquivo de traços inválido em {file_path}.")
                 print(
-                    "Esperado um dicionário com 'raw_bbox_width', 'raw_bbox_height' e 'traces'."
+                    "Esperado um dicionário com 'raw_bbox_width', 'raw_bbox_height' e 'grouped_traces'."
                 )
                 return None
             return data

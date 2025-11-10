@@ -62,6 +62,68 @@ def find_button_coordinates(xml_data, resource_id=None, content_desc=None, text=
     print(f"❌ Elemento '{content_desc or resource_id or text}' não encontrado.")
     return None
 
+def find_color_button_by_properties(xml_data, content_desc, index):
+    """
+    Encontra as coordenadas de um botão de cor dentro da paleta,
+    usando content-desc e o atributo 'index' do nó.
+    """
+    if not xml_data:
+        return None
+    try:
+        root = ET.fromstring(xml_data)
+    except ET.ParseError as e:
+        print(f"🚨 Erro ao analisar XML: {e}")
+        return None
+
+    # First, find the parent palette node (doodles_colour_palette_tools)
+    palette_parent_resource_id = "com.instagram.android:id/doodles_colour_palette_tools"
+    palette_node = None
+    for node in root.iter("node"):
+        if node.get("resource-id") == palette_parent_resource_id:
+            palette_node = node
+            break
+
+    if not palette_node:
+        print(f"❌ Contêiner da paleta de cores '{palette_parent_resource_id}' não encontrado.")
+        return None
+
+    # Now, find the colour_palette_pager within the palette_node
+    colour_palette_pager_node = None
+    for node in palette_node.iter("node"):
+        if node.get("resource-id") == "com.instagram.android:id/colour_palette_pager":
+            colour_palette_pager_node = node
+            break
+
+    if not colour_palette_pager_node:
+        print("❌ Nó 'colour_palette_pager' não encontrado dentro do contêiner da paleta.")
+        return None
+
+    # Find the specific android.view.View that contains the color buttons
+    color_buttons_container = None
+    for node in colour_palette_pager_node.findall("node"): # findall for direct children
+        if node.get("class") == "android.view.View" and not node.get("resource-id") and not node.get("content-desc"):
+            color_buttons_container = node
+            break
+    
+    if not color_buttons_container:
+        print("❌ Contêiner de botões de cor (android.view.View) não encontrado.")
+        return None
+
+    # Now, iterate through the children of the color_buttons_container to find the specific color button
+    for child_node in color_buttons_container.findall("node"): # findall for direct children
+        if child_node.get("content-desc") == content_desc and child_node.get("index") == str(index):
+            bounds_str = child_node.get("bounds")
+            if bounds_str:
+                bounds_parts = bounds_str.strip("[]").split("][")
+                start_x, start_y = map(int, bounds_parts[0].split(","))
+                end_x, end_y = map(int, bounds_parts[1].split(","))
+                center_x = (start_x + end_x) // 2
+                center_y = (start_y + end_y) // 2
+                print(
+                    f"✅ Cor '{content_desc}' com índice '{index}' encontrada em ({center_x}, {center_y})"
+                )
+                return center_x, center_y
+
 def tap_coordinates(x, y):
     """Simula um toque nas coordenadas fornecidas."""
     print(f"👆 Tocando em: ({x}, {y})")

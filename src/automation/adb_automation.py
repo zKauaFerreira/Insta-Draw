@@ -1,7 +1,62 @@
 import subprocess
 import time
 
-from .adb_utils import run_adb_command, get_screen_dump, find_button_coordinates, tap_coordinates, swipe_coordinates
+from .adb_utils import run_adb_command, get_screen_dump, find_button_coordinates, tap_coordinates, swipe_coordinates, find_color_button_by_properties
+from src.utils.color_utils import INSTAGRAM_PALETTE # Import the palette
+
+# Global state for current color selection
+current_page = 1
+current_color_index = 0
+
+# Palette bounds and swipe coordinates
+PALETTE_BOUNDS_X_START = 352
+PALETTE_BOUNDS_X_END = 981
+PALETTE_BOUNDS_Y_START = 2088
+PALETTE_BOUNDS_Y_END = 2221
+PALETTE_Y_CENTER = (PALETTE_BOUNDS_Y_START + PALETTE_BOUNDS_Y_END) // 2
+
+SWIPE_NEXT_PAGE = "800 2150 400 2150 500"
+SWIPE_PREV_PAGE = "400 2150 800 2150 500"
+
+def select_color(target_page, target_index):
+    global current_page, current_color_index
+
+    if target_page == current_page and target_index == current_color_index:
+        print(f"Cor já selecionada: Página {target_page}, Índice {target_index}. Pulando seleção.")
+        return
+
+    # Navigate to the target page
+    while current_page != target_page:
+        if target_page > current_page:
+            print(f"Deslizando para a próxima página (atual: {current_page})...")
+            swipe_coordinates(*map(int, SWIPE_NEXT_PAGE.split()))
+            current_page += 1
+        else: # target_page < current_page
+            print(f"Deslizando para a página anterior (atual: {current_page})...")
+            swipe_coordinates(*map(int, SWIPE_PREV_PAGE.split()))
+            current_page -= 1
+        time.sleep(1) # Wait 1 second after changing page
+
+    # Get fresh screen dump to find the color button dynamically
+    xml_data = get_screen_dump()
+    if not xml_data:
+        print("🚨 Erro: Não foi possível obter o dump da tela para selecionar a cor.")
+        return
+
+    # Get the content-desc for the target color from the palette
+    color_info = INSTAGRAM_PALETTE.get(target_page, [])[target_index]
+    target_content_desc = color_info["name"] + " color" # Assuming "name color" format
+
+    # Find the color button using its content-desc and index
+    color_coords = find_color_button_by_properties(xml_data, target_content_desc, target_index)
+
+    if color_coords:
+        tap_coordinates(color_coords[0], color_coords[1])
+        time.sleep(1) # Wait 1 second after clicking a color
+        current_color_index = target_index
+        print(f"✅ Cor atualizada para Página {current_page}, Índice {current_color_index}.")
+    else:
+        print(f"❌ Não foi possível encontrar a cor '{target_content_desc}' (Página {target_page}, Índice {target_index}).")
 
 
 def run_adb_automation():

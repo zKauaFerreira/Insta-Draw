@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import Canvas, filedialog, messagebox, ttk
 import subprocess # Re-added for launching overlay
 import os # Re-added for checking overlay script existence
+import threading # Added for multithreading
 
 import cv2
 import numpy as np
@@ -17,6 +18,10 @@ from src.processing.canny_processor import process_image_for_preview
 from src.processing.trace_extractor import extract_and_normalize_traces
 from src.processing.background_remover import remove_background_from_image
 from src.utils.history_manager import HistoryManager
+from src.ui.main_ui_builder import MainUIBuilder
+from src.ui.canvas_handlers import CanvasInteractionHandler
+from src.utils.color_utils import get_nearest_palette_color
+
 
 try:
     import rembg
@@ -27,11 +32,19 @@ except ImportError:
 
 class StrokeExtractorApp(tk.Tk):
     def __init__(self):
+        print("StrokeExtractorApp: __init__ started")
         super().__init__()
         self.title("🎨 Insta-Draw - Edição Avançada")
         self.geometry("1280x720")
         self.minsize(900, 600)
         self.resizable(True, True)
+
+        # Configure main window grid for 3 columns: left sidebar, canvas, right sidebar
+        self.grid_columnconfigure(0, weight=0) # Left sidebar fixed width
+        self.grid_columnconfigure(1, weight=1) # Main canvas expands
+        self.grid_columnconfigure(2, weight=0) # Right sidebar fixed width
+        self.grid_rowconfigure(0, weight=0) # Top bar fixed height
+        self.grid_rowconfigure(1, weight=1) # Main content (sidebars/canvas) expands
 
         # images in PIL.Image (or None)
         self.original_image: Image.Image | None = None
@@ -59,72 +72,30 @@ class StrokeExtractorApp(tk.Tk):
         self.eraser_var = tk.IntVar(value=24)
         self.threshold_var = tk.IntVar(value=100)
         self.traces_only_var = tk.BooleanVar(value=False)
+        self.paint_as_traces_var = tk.BooleanVar(value=False)
+        self.monochromatic_var = tk.BooleanVar(value=False)
+        self.selected_mono_color_info = None # To store the selected monochromatic color (page, index, hex, rgb)
+        self.after_id = None # For debouncing update_preview
+        self.processing_thread = None # Initialize processing thread
 
-        # build UI
-        self._build_ui()
+        # New variables for more control
+        self.contour_simplify_epsilon_var = tk.DoubleVar(value=0.0) # For cv2.approxPolyDP
+        self.min_contour_area_var = tk.IntVar(value=10) # To filter small contours
+        self.preview_line_thickness_var = tk.IntVar(value=1) # For drawing thickness in preview
 
-        # bind undo/redo
-        self.bind("<Control-z>", self.undo)
-        self.bind("<Control-y>", self.redo)
-        # Bind configure event for canvas to resize/recenter image - Moved here
-        self.canvas.bind("<Configure>", self.show_image)
-
-from src.ui.components import ScrolledFrame
-from src.processing.canny_processor import process_image_for_preview
-from src.processing.trace_extractor import extract_and_normalize_traces
-from src.processing.background_remover import remove_background_from_image
-from src.utils.history_manager import HistoryManager
-from src.ui.main_ui_builder import MainUIBuilder
-from src.ui.canvas_handlers import CanvasInteractionHandler
-
-
-class StrokeExtractorApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("🎨 Insta-Draw - Edição Avançada")
-        self.geometry("1280x720")
-        self.minsize(900, 600)
-        self.resizable(True, True)
-
-        # images in PIL.Image (or None)
-        self.original_image: Image.Image | None = None
-        self.processed_image: Image.Image | None = None
-        self.display_image: Image.Image | None = None
-
-        # editing state
-        self.erase_mode = False
-        self.scale = 1.0  # Current effective scale (auto-adjusted + slider)
-        self.last_x = None
-        self.last_y = None
-        self.crop_rect_id = None
-        self.crop_start = None
-        self.x_offset = 0  # Image offset on canvas for centering
-        self.y_offset = 0
-
-        # history for undo/redo
-        self.history_manager = HistoryManager()
-
-        # tkinter variables for sliders and checkbox
-        self.edges_var = tk.DoubleVar(value=150.0)
-        self.brightness_var = tk.DoubleVar(value=1.0)
-        self.blur_var = tk.IntVar(value=0)
-        self.scale_var = tk.DoubleVar(value=1.0)  # User's zoom factor
-        self.eraser_var = tk.IntVar(value=24)
-        self.threshold_var = tk.IntVar(value=100)
-        self.traces_only_var = tk.BooleanVar(value=False)
+        # Initialize canvas interaction handler
+        self.canvas_handler = CanvasInteractionHandler(self)
 
         # build UI
         self.ui_builder = MainUIBuilder(self)
         self.ui_builder.build_ui()
 
-        # Initialize canvas interaction handler
-        self.canvas_handler = CanvasInteractionHandler(self)
-
         # bind undo/redo
         self.bind("<Control-z>", self.undo)
         self.bind("<Control-y>", self.redo)
         # Bind configure event for canvas to resize/recenter image - Moved here
         self.canvas.bind("<Configure>", self.show_image)
+        print("StrokeExtractorApp: __init__ finished")
 
     # ---------- I/O ----------
     def load_image(self):
@@ -147,7 +118,7 @@ class StrokeExtractorApp(tk.Tk):
         self.history_manager.clear()
         self._save_state_for_undo()
 
-        self.show_image()  # Display the image after loading
+        self.update_preview() # Call directly to refresh preview
         self.status_label.config(text=f"Imagem carregada: {path.split('/')[-1]}")
 
     def save_image(self):
@@ -169,6 +140,7 @@ class StrokeExtractorApp(tk.Tk):
             messagebox.showerror("Erro ao salvar", str(e))
 
     def save_traces(self):
+        print("save_traces method called!")
         if self.original_image is None:
             messagebox.showwarning("Nada para salvar", "Processe uma imagem primeiro.")
             return
@@ -216,10 +188,23 @@ class StrokeExtractorApp(tk.Tk):
         # draw_automation.py will read it directly.
 
         # --- Step 3: Process image and extract traces ---
-        arr = np.array(self.original_image)
+        # Determine which image to use for trace extraction and color sampling
+        if self.paint_as_traces_var.get():
+            # If "Paint as Traces" is active, use the display_image (which includes user edits)
+            image_for_traces = self.display_image.convert("RGB")
+            self.status_label.config(text="Extraindo traços da pintura...")
+        else:
+            # Otherwise, use the original_image
+            image_for_traces = self.original_image.convert("RGB")
+            self.status_label.config(text="Extraindo traços da imagem original...")
+
+        original_img_np = np.array(image_for_traces)
+
+        arr = np.array(image_for_traces)
         try:
             gray = cv2.cvtColor(arr, cv2.COLOR_RGBA2GRAY)
         except Exception:
+            # fallback: convert RGB first
             gray = cv2.cvtColor(arr[..., :3], cv2.COLOR_RGB2GRAY)
 
         blur_val = self.blur_var.get()
@@ -234,7 +219,28 @@ class StrokeExtractorApp(tk.Tk):
 
         contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-        if not contours:
+        # Apply contour simplification and filtering
+        filtered_contours = []
+        epsilon_val = self.contour_simplify_epsilon_var.get()
+        min_area_val = self.min_contour_area_var.get()
+
+        for contour in contours:
+            # Filter by minimum area
+            if cv2.contourArea(contour) < min_area_val:
+                continue
+            
+            # Simplify contour if epsilon is greater than 0
+            if epsilon_val > 0:
+                # Calculate epsilon based on contour perimeter
+                perimeter = cv2.arcLength(contour, True)
+                epsilon = epsilon_val * perimeter / 100 # Epsilon as percentage of perimeter
+                approx_contour = cv2.approxPolyDP(contour, epsilon, True)
+                if len(approx_contour) > 1: # Ensure simplified contour has at least 2 points
+                    filtered_contours.append(approx_contour)
+            else:
+                filtered_contours.append(contour)
+
+        if not filtered_contours:
             messagebox.showinfo(
                 "Nenhum traço",
                 "Nenhum traço foi encontrado com as configurações atuais.",
@@ -245,10 +251,45 @@ class StrokeExtractorApp(tk.Tk):
         path = "data/traces.json"
 
         all_raw_points = []
-        raw_processed_traces = []
+        # Use a dictionary to group traces by color
+        grouped_traces_by_color = {} # Key: (page_index, color_index), Value: list of {"path": coords, "original_rgb": original_rgb}
 
-        for contour in contours:
+        for contour in filtered_contours: # Iterate through filtered contours
+            # Calculate bounding box for the contour
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Sample color at the center of the bounding box
+            center_x = x + w // 2
+            center_y = y + h // 2
 
+            # Ensure coordinates are within image bounds
+            center_x = max(0, min(original_img_np.shape[1] - 1, center_x))
+            center_y = max(0, min(original_img_np.shape[0] - 1, center_y))
+
+            # Get pixel color at the center of the bounding box
+            # original_img_np is already RGB (or RGBA, but we only need RGB)
+            pixel_color = original_img_np[center_y, center_x][:3]
+            original_rgb = (int(pixel_color[0]), int(pixel_color[1]), int(pixel_color[2])) # Ensure it's an RGB tuple
+
+
+            # Find the nearest Instagram palette color
+            # Apply color overrides if any
+            color_overrides = {
+                (75, 140, 225): {"page_index": 1, "color_index": 3, "hex_value": "#FFDC4C", "rgb_value": (255, 220, 76), "name": "Yellow"}
+            }
+
+            if original_rgb in color_overrides:
+                nearest_color_info = color_overrides[original_rgb]
+                print(f"DEBUG (save_traces): Color override applied for {original_rgb} -> {nearest_color_info['name']}")
+            elif self.monochromatic_var.get():
+                if self.selected_mono_color_info is None:
+                    messagebox.showwarning("Cor Monocromática", "Selecione uma cor para o modo monocromático.")
+                    return # Exit if no color is selected in monochromatic mode
+                nearest_color_info = self.selected_mono_color_info
+            else:
+                nearest_color_info = get_nearest_palette_color(*original_rgb)
+            
+            print(f"DEBUG (save_traces): Contour original_rgb: {original_rgb} mapped to {nearest_color_info['name']} (Palette RGB: {nearest_color_info['rgb_value']})")
 
             # Do not simplify contour; use raw contour points
             # Ensure contour coordinates are integers
@@ -260,7 +301,14 @@ class StrokeExtractorApp(tk.Tk):
             for p in coords:
                 all_raw_points.append(p)
             
-            raw_processed_traces.append({"path": coords})
+            # Group traces by their palette color
+            color_key = (nearest_color_info["page_index"], nearest_color_info["color_index"])
+            if color_key not in grouped_traces_by_color:
+                grouped_traces_by_color[color_key] = {
+                    "palette_color": nearest_color_info,
+                    "paths": []
+                }
+            grouped_traces_by_color[color_key]["paths"].append(coords)
         
         if not all_raw_points:
             messagebox.showinfo(
@@ -286,18 +334,26 @@ class StrokeExtractorApp(tk.Tk):
             return
 
         # Normalize traces to start from (0,0) relative to their bounding box
-        normalized_traces = []
-        for trace in raw_processed_traces:
-            normalized_path = []
-            for p in trace["path"]:
-                normalized_path.append([p[0] - min_x, p[1] - min_y])
-            normalized_traces.append({"path": normalized_path})
+        # The structure of traces_data_to_save will change to reflect grouped traces
+        normalized_grouped_traces = []
+        for color_key, color_group in grouped_traces_by_color.items():
+            normalized_paths_for_color = []
+            for trace_path in color_group["paths"]:
+                normalized_path = []
+                for p in trace_path:
+                    normalized_path.append([p[0] - min_x, p[1] - min_y])
+                normalized_paths_for_color.append(normalized_path)
+            
+            normalized_grouped_traces.append({
+                "palette_color": color_group["palette_color"],
+                "paths": normalized_paths_for_color
+            })
 
         # Save raw, normalized traces and their bounding box dimensions
         traces_data_to_save = {
             "raw_bbox_width": raw_bbox_width,
             "raw_bbox_height": raw_bbox_height,
-            "traces": normalized_traces
+            "grouped_traces": normalized_grouped_traces # Changed from "traces" to "grouped_traces"
         }
 
         try:
@@ -344,10 +400,54 @@ class StrokeExtractorApp(tk.Tk):
 
     # ---------- processamento / preview ----------
     def update_preview(self, _=None):
-        """Gera preview convertendo imagem para traços e blendando com a imagem colorida."""
+        """
+        Debounces the actual preview update to prevent excessive calls when sliders are adjusted rapidly.
+        Starts image processing in a separate thread.
+        """
         if self.original_image is None:
             self.status_label.config(text="Carrega uma imagem primeiro.")
             return
+
+        if self.after_id:
+            self.after_cancel(self.after_id)
+        
+        # Use a shorter debounce for checkboxes/sliders that trigger heavy processing
+        # This ensures that rapid changes don't queue up too many threads
+        debounce_time = 50 # ms
+
+        self.after_id = self.after(debounce_time, self._start_preview_processing_thread)
+
+    def _start_preview_processing_thread(self):
+        """Starts the image processing in a separate thread."""
+        if self.processing_thread and self.processing_thread.is_alive():
+            # If a thread is already running, let it finish.
+            # For more advanced cancellation, a threading.Event could be used.
+            self.status_label.config(text="Processamento em andamento... aguarde.")
+            return
+
+        self.status_label.config(text="Processando imagem em segundo plano...")
+        self.processing_thread = threading.Thread(target=self._process_image_for_preview_threaded)
+        self.processing_thread.daemon = True # Allow the main program to exit even if thread is running
+        self.processing_thread.start()
+
+    def _process_image_for_preview_threaded(self):
+        """
+        Wrapper for _process_image_for_preview to be run in a separate thread.
+        Updates the UI on the main thread after processing.
+        """
+        processed_image = self._process_image_for_preview()
+        if processed_image:
+            self.after(0, self._update_ui_with_processed_image, processed_image)
+        else:
+            self.after(0, lambda: self.status_label.config(text="Falha no processamento do preview."))
+
+    def _process_image_for_preview(self):
+        """
+        Performs the heavy image processing for the preview.
+        Returns the processed PIL Image.
+        """
+        if self.original_image is None:
+            return None
 
         # always work in numpy (RGBA)
         arr = np.array(self.original_image)  # shape HxWx4
@@ -371,10 +471,67 @@ class StrokeExtractorApp(tk.Tk):
         edges = cv2.Canny(gray, lower, upper)
 
         if self.traces_only_var.get():
-            # black traces on a white background (for Instagram-like drawing style)
-            traces = cv2.bitwise_not(edges)
-            combined = cv2.cvtColor(traces, cv2.COLOR_GRAY2RGBA)
-            combined[:, :, 3] = 255  # Make sure alpha is fully opaque
+            # Determine which image to use for trace extraction and color sampling for preview
+            if self.paint_as_traces_var.get():
+                image_for_preview_traces = self.display_image.convert("RGB")
+            else:
+                image_for_preview_traces = self.original_image.convert("RGB")
+
+            contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Apply contour simplification and filtering for preview
+            filtered_contours = []
+            epsilon_val = self.contour_simplify_epsilon_var.get()
+            min_area_val = self.min_contour_area_var.get()
+            line_thickness = self.preview_line_thickness_var.get()
+
+            for contour in contours:
+                # Filter by minimum area
+                if cv2.contourArea(contour) < min_area_val:
+                    continue
+                
+                # Simplify contour if epsilon is greater than 0
+                if epsilon_val > 0:
+                    # Calculate epsilon based on contour perimeter
+                    perimeter = cv2.arcLength(contour, True)
+                    epsilon = epsilon_val * perimeter / 100 # Epsilon as percentage of perimeter
+                    approx_contour = cv2.approxPolyDP(contour, epsilon, True)
+                    if len(approx_contour) > 1: # Ensure simplified contour has at least 2 points
+                        filtered_contours.append(approx_contour)
+                else:
+                    filtered_contours.append(contour)
+
+            # Create a blank white image for drawing colored traces
+            combined = np.full(image_for_preview_traces.size[::-1] + (4,), 255, dtype=np.uint8) # White RGBA background
+            
+            original_img_np = np.array(image_for_preview_traces)
+
+            for contour in filtered_contours: # Iterate through filtered contours
+                # Determine the color to draw the contour with
+                if self.monochromatic_var.get() and self.selected_mono_color_info:
+                    palette_rgb = self.selected_mono_color_info["rgb_value"]
+                else:
+                    # Calculate average color for the current contour from the chosen image
+                    mask = np.zeros(original_img_np.shape[:2], dtype=np.uint8)
+                    cv2.drawContours(mask, [contour], -1, 255, -1) # Draw contour on mask
+                    
+                    # Use the mask to get the mean color of the image within the contour
+                    mean_color_bgr = cv2.mean(original_img_np, mask=mask)[:3]
+                    original_rgb = (int(mean_color_bgr[2]), int(mean_color_bgr[1]), int(mean_color_bgr[0])) # Convert BGR to RGB
+
+                    # Find the nearest Instagram palette color
+                    nearest_color_info = get_nearest_palette_color(*original_rgb)
+                    print(f"DEBUG: Original RGB: {original_rgb}, Nearest Palette Color: {nearest_color_info['hex_value']} (Page: {nearest_color_info['page_index']}, Index: {nearest_color_info['color_index']})")
+                    
+                    if nearest_color_info:
+                        palette_rgb = nearest_color_info["rgb_value"]
+                    else:
+                        palette_rgb = (0, 0, 0) # Default to black if no color info
+
+                # OpenCV uses BGR, so convert RGB to BGR
+                palette_bgr = (palette_rgb[2], palette_rgb[1], palette_rgb[0])
+                cv2.drawContours(combined, [contour], -1, palette_bgr + (255,), line_thickness) # Draw with color and full opacity
+            
         else:
             # invert edges so they are white lines on a black background initially
             edges_inv = cv2.bitwise_not(edges)
@@ -400,8 +557,11 @@ class StrokeExtractorApp(tk.Tk):
             combined_rgb = cv2.addWeighted(boosted, 0.85, edges_rgba[..., :3], 0.45, 0)
             combined = np.dstack([combined_rgb, alpha])
 
-        # set processed/display images as PIL Image
-        self.processed_image = Image.fromarray(combined)
+        return Image.fromarray(combined)
+
+    def _update_ui_with_processed_image(self, processed_image):
+        """Updates the UI with the processed image on the main thread."""
+        self.processed_image = processed_image
         self.display_image = self.processed_image.copy()
         self._save_state_for_undo()
         self.show_image()
@@ -441,7 +601,7 @@ class StrokeExtractorApp(tk.Tk):
             self.status_label.config(text="Falha ao remover fundo.")
 
     # ---------- canvas display / interactions ----------
-    def show_image(self, _=None):
+    def show_image(self, event=None):
         """Desenha a imagem atual (display_image) no canvas com a escala atual."""
         if self.display_image is None:
             return
@@ -477,7 +637,6 @@ class StrokeExtractorApp(tk.Tk):
 
         # clear canvas and draw
         self.canvas.delete("all")
-        # Ensure canvas dimensions match current widget size
         self.canvas.config(width=canvas_w, height=canvas_h)
         self.canvas.create_image(
             self.x_offset, self.y_offset, anchor="nw", image=self._tkimg
@@ -664,6 +823,7 @@ class StrokeExtractorApp(tk.Tk):
 
     # ---------- finish ----------
     def run(self):
+        print("StrokeExtractorApp: run method called, entering mainloop...")
         self.mainloop()
 
 

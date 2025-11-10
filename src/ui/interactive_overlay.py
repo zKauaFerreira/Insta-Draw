@@ -284,6 +284,8 @@ class InteractiveOverlay(tk.Tk):
             "width": self._current_width,
             "height": self._current_height,
         }
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(self.coords_file), exist_ok=True)
         with open(self.coords_file, "w") as f:
             json.dump(coords, f)
 
