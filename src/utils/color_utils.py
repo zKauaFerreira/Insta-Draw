@@ -77,13 +77,8 @@ def get_nearest_palette_color(r, g, b):
             dg = g - pg
             db = b - pb
 
-            # Calculate r_mean for Redmean formula
-            r_mean = (r + pr) / 2
-
-            # Redmean distance formula
-            distance_sq = (2 + r_mean/256) * (dr**2) + \
-                          4 * (dg**2) + \
-                          (2 + (255 - r_mean)/256) * (db**2)
+            # Calculate Euclidean distance in RGB space
+            distance_sq = dr**2 + dg**2 + db**2
 
             if distance_sq < min_distance:
                 min_distance = distance_sq
