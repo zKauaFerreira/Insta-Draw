@@ -20,9 +20,9 @@ INSTAGRAM_PALETTE = {
         {"name": "Pale orange", "hex": "#F0A078", "rgb": (240, 160, 120)},
         {"name": "Light brown", "hex": "#AF8760", "rgb": (175, 135, 96)},
         {"name": "Brown", "hex": "#795548", "rgb": (121, 85, 72)},
-        {"name": "Dark gray 3", "hex": "#444444", "rgb": (68, 68, 68)},
-        {"name": "Dark gray 2", "hex": "#222222", "rgb": (34, 34, 34)},
-        {"name": "Dark gray 1 (Black)", "hex": "#000000", "rgb": (0, 0, 0)}
+        {"name": "Dark gray 3 color", "hex": "#444444", "rgb": (68, 68, 68)},
+        {"name": "Dark gray 2 color", "hex": "#222222", "rgb": (34, 34, 34)},
+        {"name": "Dark gray 1 color", "hex": "#000000", "rgb": (0, 0, 0)}
     ],
     3: [ # Página 3: Tons de Cinza (Ordem visual na Imagem 2)
         {"name": "Medium gray 3", "hex": "#AAAAAA", "rgb": (170, 170, 170)},
