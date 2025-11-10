@@ -45,7 +45,7 @@ def select_color(target_page, target_index):
 
     # Get the content-desc for the target color from the palette
     color_info = INSTAGRAM_PALETTE.get(target_page, [])[target_index]
-    target_content_desc = color_info["name"] + " color" # Assuming "name color" format
+    target_content_desc = color_info["name"]
 
     # Find the color button using its content-desc and index
     color_coords = find_color_button_by_properties(xml_data, target_content_desc, target_index)
