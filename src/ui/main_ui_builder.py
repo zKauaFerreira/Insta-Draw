@@ -240,6 +240,24 @@ class MainUIBuilder:
         self.app.slider_line_thickness.pack(pady=2, padx=12, fill="x")
 
         tk.Label(
+            self.app.left_controls_frame, text="Suavização Spline (Preview)", bg="#2b2b2b", fg="white"
+        ).pack(pady=(8, 2), anchor="w", padx=12)
+        self.app.slider_spline_segments = tk.Scale(
+            self.app.left_controls_frame,
+            from_=1,
+            to=20,
+            orient="horizontal",
+            command=self.app.update_preview,
+            variable=self.app.spline_segments_var,
+            bg="#2b2b2b",
+            fg="white",
+            highlightbackground="black",
+            troughcolor="#3b8ed0",
+            sliderrelief="flat",
+        )
+        self.app.slider_spline_segments.pack(pady=2, padx=12, fill="x")
+
+        tk.Label(
             self.app.left_controls_frame, text="Zoom / Resize (live)", bg="#2b2b2b", fg="white"
         ).pack(pady=(8, 2), anchor="w", padx=12)
         self.app.slider_scale = tk.Scale(

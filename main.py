@@ -22,6 +22,7 @@ from src.utils.history_manager import HistoryManager
 from src.ui.main_ui_builder import MainUIBuilder
 from src.ui.canvas_handlers import CanvasInteractionHandler
 from src.utils.color_utils import get_nearest_palette_color
+from src.utils.curve_utils import catmull_rom_spline
 
 
 try:
@@ -89,6 +90,7 @@ class StrokeExtractorApp(tk.Tk):
         self.contour_simplify_epsilon_var = tk.DoubleVar(value=0.0) # For cv2.approxPolyDP
         self.min_contour_area_var = tk.IntVar(value=10) # To filter small contours
         self.preview_line_thickness_var = tk.IntVar(value=1) # For drawing thickness in preview
+        self.spline_segments_var = tk.IntVar(value=5) # For Catmull-Rom spline segments
 
         # Initialize canvas interaction handler
         self.canvas_handler = CanvasInteractionHandler(self)
@@ -334,12 +336,52 @@ class StrokeExtractorApp(tk.Tk):
             )
             return
 
-        # --- Estimated Time Calculation ---
+        # --- New, more accurate time estimation ---
+        # Constants based on draw_automation.py and adb_automation.py
+        # These could be exposed as settings in the UI in the future
+        SPEED_LEVEL = "medium"
+        STROKES_PER_CHUNK = 70
+        CHUNK_BREAK_TIME = 3 # seconds
+        SPLINE_SEGMENTS = 5 # As used in draw_automation.py
+        
+        # Timing from DRAWING_SPEED in draw_automation.py
+        time_per_point_move = 0.005 # pyautogui.PAUSE for "medium"
+        time_per_point_duration = 0.075 # duration for "medium"
+        
+        # Timing from adb_automation.py
+        # This is a simplification. A more complex calculation would need to know the page of each color.
+        # Average time per color change (navigate pages + select color)
+        avg_time_per_color_change = 2.0 # (e.g., 1s swipe + 0.5s select + 0.5s buffer)
+
+        # Timing from pauses in draw_automation.py
+        pause_before_stroke = time_per_point_move * 2
+        pause_after_stroke = 0.1
+
+        # 1. Calculate total number of points after spline interpolation
+        total_splined_points = 0
+        total_strokes = 0
+        for contour in filtered_contours:
+            # The number of points from the spline is roughly len(contour) * num_segments
+            splined_contour = catmull_rom_spline(contour.squeeze().tolist(), num_segments=SPLINE_SEGMENTS)
+            total_splined_points += len(splined_contour)
+            total_strokes += 1
+
+        # 2. Calculate time spent drawing (moving the mouse)
+        drawing_time = total_splined_points * (time_per_point_move + time_per_point_duration)
+
+        # 3. Calculate time spent on pauses between each stroke
+        inter_stroke_pause_time = total_strokes * (pause_before_stroke + pause_after_stroke)
+
+        # 4. Calculate time spent on long breaks between chunks
+        num_chunks = (total_strokes - 1) // STROKES_PER_CHUNK if STROKES_PER_CHUNK > 0 else 0
+        chunk_break_time_total = num_chunks * CHUNK_BREAK_TIME
+
+        # 5. Calculate time spent changing colors
         num_color_changes = len(grouped_traces_by_color)
-        # Heuristic values: time per point and time per color change
-        time_per_point = 0.005  # seconds per point
-        time_per_color_change = 1.5  # seconds to change a color
-        estimated_total_seconds = (total_points * time_per_point) + (num_color_changes * time_per_color_change)
+        color_change_time = num_color_changes * avg_time_per_color_change
+
+        # 6. Sum it all up
+        estimated_total_seconds = drawing_time + inter_stroke_pause_time + chunk_break_time_total + color_change_time
         
         minutes, seconds = divmod(int(estimated_total_seconds), 60)
         self.estimated_time_label.config(text=f"Estimado: {minutes:02d}:{seconds:02d}")
@@ -544,13 +586,19 @@ class StrokeExtractorApp(tk.Tk):
             original_img_np = np.array(image_for_preview_traces.convert("RGB"))
 
             for contour in filtered_contours: # Iterate through filtered contours
+                # Apply Catmull-Rom spline for a smoother preview
+                splined_contour = catmull_rom_spline(contour.squeeze().tolist(), num_segments=self.spline_segments_var.get())
+                
+                # Convert splined points to integer format for drawing
+                splined_contour_np = np.array([splined_contour], dtype=np.int32)
+
                 # Determine the color to draw the contour with
                 if self.monochromatic_var.get() and self.selected_mono_color_info:
                     palette_rgb = self.selected_mono_color_info["rgb_value"]
                 else:
                     # Calculate average color for the current contour from the chosen image
                     mask = np.zeros(original_img_np.shape[:2], dtype=np.uint8)
-                    cv2.drawContours(mask, [contour], -1, 255, -1) # Draw contour on mask
+                    cv2.drawContours(mask, [contour], -1, 255, -1) # Draw original contour on mask for color sampling
                     
                     # Use the mask to get the mean color of the image within the contour
                     mean_color_bgr = cv2.mean(original_img_np, mask=mask)[:3]
@@ -566,7 +614,7 @@ class StrokeExtractorApp(tk.Tk):
 
                 # OpenCV uses BGR, so convert RGB to BGR
                 palette_bgr = (palette_rgb[2], palette_rgb[1], palette_rgb[0])
-                cv2.drawContours(combined, [contour], -1, palette_bgr + (255,), line_thickness) # Draw with color and full opacity
+                cv2.drawContours(combined, splined_contour_np, -1, palette_bgr + (255,), line_thickness) # Draw splined contour
             
         else:
             # invert edges so they are white lines on a black background initially

@@ -5,6 +5,13 @@ def catmull_rom_spline(points, num_segments=5):
     Generates a smooth curve using Catmull-Rom spline interpolation.
     Points should be a list of [x, y] coordinates.
     """
+    if not points:
+        return []
+    
+    # Guard against single points passed as [x, y] which has len 2
+    if isinstance(points[0], (int, float)):
+        return [points]
+
     if len(points) < 2:
         return points
     if len(points) == 2:

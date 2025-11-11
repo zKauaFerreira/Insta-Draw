@@ -52,7 +52,7 @@ def select_color(target_page, target_index):
 
     if color_coords:
         tap_coordinates(color_coords[0], color_coords[1])
-        time.sleep(1) # Wait 1 second after clicking a color
+        time.sleep(0.5) # Wait 0.5 seconds after clicking a color
         current_color_index = target_index
         print(f"✅ Cor atualizada para Página {current_page}, Índice {current_color_index}.")
     else:
