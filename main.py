@@ -8,6 +8,7 @@ from tkinter import Canvas, filedialog, messagebox, ttk
 import subprocess # Re-added for launching overlay
 import os # Re-added for checking overlay script existence
 import threading # Added for multithreading
+import time
 
 import cv2
 import numpy as np
@@ -28,6 +29,9 @@ try:
     REMBG_AVAILABLE = True
 except ImportError:
     REMBG_AVAILABLE = False
+
+PREVIEW_MAX_SIZE = (800, 800)
+
 
 
 class StrokeExtractorApp(tk.Tk):
@@ -71,12 +75,15 @@ class StrokeExtractorApp(tk.Tk):
         self.scale_var = tk.DoubleVar(value=1.0)  # User's zoom factor
         self.eraser_var = tk.IntVar(value=24)
         self.threshold_var = tk.IntVar(value=100)
-        self.traces_only_var = tk.BooleanVar(value=False)
+        self.traces_only_var = tk.BooleanVar(value=True)
         self.paint_as_traces_var = tk.BooleanVar(value=False)
         self.monochromatic_var = tk.BooleanVar(value=False)
         self.selected_mono_color_info = None # To store the selected monochromatic color (page, index, hex, rgb)
         self.after_id = None # For debouncing update_preview
         self.processing_thread = None # Initialize processing thread
+
+        self.start_time = 0
+        self.elapsed_time_timer_id = None
 
         # New variables for more control
         self.contour_simplify_epsilon_var = tk.DoubleVar(value=0.0) # For cv2.approxPolyDP
@@ -96,6 +103,13 @@ class StrokeExtractorApp(tk.Tk):
         # Bind configure event for canvas to resize/recenter image - Moved here
         self.canvas.bind("<Configure>", self.show_image)
         print("StrokeExtractorApp: __init__ finished")
+
+    def _update_elapsed_time(self):
+        if self.start_time > 0:
+            elapsed_seconds = int(time.time() - self.start_time)
+            minutes, seconds = divmod(elapsed_seconds, 60)
+            self.elapsed_time_label.config(text=f"Decorrido: {minutes:02d}:{seconds:02d}")
+            self.elapsed_time_timer_id = self.after(1000, self._update_elapsed_time)
 
     # ---------- I/O ----------
     def load_image(self):
@@ -253,8 +267,11 @@ class StrokeExtractorApp(tk.Tk):
         all_raw_points = []
         # Use a dictionary to group traces by color
         grouped_traces_by_color = {} # Key: (page_index, color_index), Value: list of {"path": coords, "original_rgb": original_rgb}
+        
+        total_points = 0
 
         for contour in filtered_contours: # Iterate through filtered contours
+            total_points += len(contour)
             # Calculate bounding box for the contour
             x, y, w, h = cv2.boundingRect(contour)
             
@@ -317,6 +334,16 @@ class StrokeExtractorApp(tk.Tk):
             )
             return
 
+        # --- Estimated Time Calculation ---
+        num_color_changes = len(grouped_traces_by_color)
+        # Heuristic values: time per point and time per color change
+        time_per_point = 0.005  # seconds per point
+        time_per_color_change = 1.5  # seconds to change a color
+        estimated_total_seconds = (total_points * time_per_point) + (num_color_changes * time_per_color_change)
+        
+        minutes, seconds = divmod(int(estimated_total_seconds), 60)
+        self.estimated_time_label.config(text=f"Estimado: {minutes:02d}:{seconds:02d}")
+        
         # Calculate overall bounding box of all raw traces
         min_x = min(p[0] for p in all_raw_points)
         min_y = min(p[1] for p in all_raw_points)
@@ -365,38 +392,40 @@ class StrokeExtractorApp(tk.Tk):
             messagebox.showerror("Erro ao salvar traços", str(e))
 
     def start_drawing_automation(self):
-        adb_script_name = "src/automation/adb_automation.py"
-        if not os.path.exists(adb_script_name):
-            messagebox.showerror(
-                "Erro",
-                f"O arquivo '{adb_script_name}' não foi encontrado. "
-                "Certifique-se de que ele está no diretório correto."
-            )
-            return
-        
-        self.status_label.config(text="Iniciando automação ADB e de desenho...")
-        self.update_idletasks()
-        self.start_automation_button.config(state="disabled") # Disable button during automation
+        def _run_automation():
+            """Runs the automation in a thread, managing UI updates."""
+            self.start_time = time.time()
+            # Schedule the timer to start in the main thread
+            self.after(0, self._update_elapsed_time)
+            
+            self.status_label.config(text="Iniciando automação ADB e de desenho...")
+            self.start_automation_button.config(state="disabled")
 
-        try:
-            # Execute adb_automation.py, which will then execute draw_automation.py
-            subprocess.run(["python3", "-m", "src.automation.adb_automation"], check=True)
-            self.status_label.config(text="Automação de desenho concluída (ou cancelada).")
-        except subprocess.CalledProcessError as e:
-            messagebox.showerror("Erro", f"Erro ao executar automação: {e}")
-            self.status_label.config(text="Automação de desenho falhou.")
-        except FileNotFoundError:
             try:
-                subprocess.run(["python", adb_script_name], check=True)
-                self.status_label.config(text="Automação de desenho concluída (ou cancelada).")
-            except:
-                messagebox.showerror(
-                    "Erro",
-                    "O comando 'python3' ou 'python' não foi reconhecido. Verifique o PATH."
-                )
+                # Using python -m to ensure it runs as a module
+                subprocess.run(["python3", "-m", "src.automation.adb_automation"], check=True, capture_output=True, text=True)
+                self.status_label.config(text="Automação de desenho concluída.")
+            except subprocess.CalledProcessError as e:
+                error_message = "Erro na automação:\n"
+                error_message += e.stderr or "Nenhuma saída de erro capturada."
+                messagebox.showerror("Erro de Automação", error_message)
                 self.status_label.config(text="Automação de desenho falhou.")
-        finally:
-            self.start_automation_button.config(state="normal") # Re-enable button after completion/failure
+            except FileNotFoundError:
+                messagebox.showerror("Erro", "O comando 'python3' não foi encontrado. Verifique o PATH.")
+                self.status_label.config(text="Automação de desenho falhou.")
+            except Exception as e:
+                messagebox.showerror("Erro Inesperado", f"Ocorreu um erro inesperado: {e}")
+                self.status_label.config(text="Automação de desenho falhou.")
+            finally:
+                # Stop the timer
+                if self.elapsed_time_timer_id:
+                    self.after_cancel(self.elapsed_time_timer_id)
+                self.start_time = 0
+                # Re-enable the button in the main thread
+                self.after(0, lambda: self.start_automation_button.config(state="normal"))
+
+        # Run the automation in a separate thread to keep the UI responsive
+        threading.Thread(target=_run_automation, daemon=True).start()
 
     # ---------- processamento / preview ----------
     def update_preview(self, _=None):
@@ -413,7 +442,7 @@ class StrokeExtractorApp(tk.Tk):
         
         # Use a shorter debounce for checkboxes/sliders that trigger heavy processing
         # This ensures that rapid changes don't queue up too many threads
-        debounce_time = 50 # ms
+        debounce_time = 250 # ms
 
         self.after_id = self.after(debounce_time, self._start_preview_processing_thread)
 
@@ -449,8 +478,14 @@ class StrokeExtractorApp(tk.Tk):
         if self.original_image is None:
             return None
 
+        # --- Performance Optimization ---
+        # Create a downscaled version of the image for preview processing
+        preview_img = self.original_image.copy()
+        preview_img.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS)
+        
         # always work in numpy (RGBA)
-        arr = np.array(self.original_image)  # shape HxWx4
+        arr = np.array(preview_img)
+
         # convert to gray (cv2 understands RGBA->GRAY with cv2.COLOR_RGBA2GRAY)
         try:
             gray = cv2.cvtColor(arr, cv2.COLOR_RGBA2GRAY)
@@ -473,9 +508,11 @@ class StrokeExtractorApp(tk.Tk):
         if self.traces_only_var.get():
             # Determine which image to use for trace extraction and color sampling for preview
             if self.paint_as_traces_var.get():
-                image_for_preview_traces = self.display_image.convert("RGB")
+                # For "Paint as Traces", we need to use the display_image, but also downscaled
+                image_for_preview_traces = self.display_image.copy()
+                image_for_preview_traces.thumbnail(PREVIEW_MAX_SIZE, Image.Resampling.LANCZOS)
             else:
-                image_for_preview_traces = self.original_image.convert("RGB")
+                image_for_preview_traces = preview_img.convert("RGB")
 
             contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -504,7 +541,7 @@ class StrokeExtractorApp(tk.Tk):
             # Create a blank white image for drawing colored traces
             combined = np.full(image_for_preview_traces.size[::-1] + (4,), 255, dtype=np.uint8) # White RGBA background
             
-            original_img_np = np.array(image_for_preview_traces)
+            original_img_np = np.array(image_for_preview_traces.convert("RGB"))
 
             for contour in filtered_contours: # Iterate through filtered contours
                 # Determine the color to draw the contour with
@@ -521,7 +558,6 @@ class StrokeExtractorApp(tk.Tk):
 
                     # Find the nearest Instagram palette color
                     nearest_color_info = get_nearest_palette_color(*original_rgb)
-                    print(f"DEBUG: Original RGB: {original_rgb}, Nearest Palette Color: {nearest_color_info['hex_value']} (Page: {nearest_color_info['page_index']}, Index: {nearest_color_info['color_index']})")
                     
                     if nearest_color_info:
                         palette_rgb = nearest_color_info["rgb_value"]

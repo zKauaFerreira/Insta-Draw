@@ -70,6 +70,26 @@ class MainUIBuilder:
         )
         self.app.start_automation_button.pack(side="left", padx=5, pady=6)
 
+        # Label for estimated time
+        self.app.estimated_time_label = tk.Label(
+            self.app.top_bar_frame,
+            text="Estimado: 00:00",
+            font=("Arial", 10),
+            bg="#2b2b2b",
+            fg="white",
+        )
+        self.app.estimated_time_label.pack(side="left", padx=5, pady=6)
+
+        # Label for elapsed time
+        self.app.elapsed_time_label = tk.Label(
+            self.app.top_bar_frame,
+            text="Decorrido: 00:00",
+            font=("Arial", 10),
+            bg="#2b2b2b",
+            fg="white",
+        )
+        self.app.elapsed_time_label.pack(side="left", padx=5, pady=6)
+
         # LEFT SCROLLABLE CONTROLS PANEL
         self.app.left_controls_wrapper = ScrolledFrame(self.app, bg="#2b2b2b", width=320)
         self.app.left_controls_wrapper.grid(row=1, column=0, sticky="nswe")
